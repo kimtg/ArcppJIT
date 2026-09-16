@@ -94,12 +94,27 @@ namespace arc {
 		env(std::shared_ptr<struct env> parent);
 	};
 
+	struct compiled_fn;
+
 	struct closure {
 		std::shared_ptr<struct env> parent_env;
 		atom args;
 		atom body;
+		std::shared_ptr<struct compiled_fn> compiled;
+		sym name = -1;
+		bool compile_attempted = false;
+		bool is_macro = false;
+		int call_count = 0;
 		closure(const std::shared_ptr<struct env> &env, atom args, atom body);
 	};
+
+	extern const atom nil;
+	extern atom sym_t, sym_quote, sym_assign, sym_fn, sym_if, sym_do;
+	extern std::shared_ptr<struct env> global_env;
+	extern std::unordered_map<sym, std::string> str_of_sym;
+
+	std::vector<atom> atom_to_vector(atom a);
+	atom vector_to_atom(const std::vector<atom>& a, int start);
 
 	/* forward declarations */
 	error apply(const atom &fn, const std::vector<atom> &args, atom *result);
@@ -111,6 +126,7 @@ namespace arc {
 	std::string to_string(atom a, int write);
 	error macex_eval(atom expr, atom *result);
 	error arc_load_file(const char *path);
+	error load_string(const char *text);
 	void arc_init();
 #ifndef READLINE
 	char *readline(const char *prompt);
@@ -128,6 +144,17 @@ namespace arc {
 	atom & cdr(const atom & a);
 	bool no(const atom & a);
 	bool sym_is(const atom & a, const atom & b);
+	error env_get(std::shared_ptr<struct env> env, sym symbol, atom* result);
+	error env_assign_eq(std::shared_ptr<struct env> env, sym symbol, const atom &value);
+	error env_assign(const std::shared_ptr<struct env>& env, sym symbol, const atom &value);
+	error builtin_add(const std::vector<atom>& vargs, atom* result);
+	error builtin_subtract(const std::vector<atom>& vargs, atom* result);
+	error builtin_multiply(const std::vector<atom>& vargs, atom* result);
+	error builtin_divide(const std::vector<atom>& vargs, atom* result);
+	error builtin_mod(const std::vector<atom>& vargs, atom* result);
+	error builtin_less(const std::vector<atom>& vargs, atom* result);
+	error builtin_greater(const std::vector<atom>& vargs, atom* result);
+	error builtin_is(const std::vector<atom>& vargs, atom* result);
 	/* end forward */
 }
 

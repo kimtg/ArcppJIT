@@ -1,4 +1,5 @@
 #include "arc.h"
+#include "jit.h"
 
 namespace arc {
 	const char* error_string[] = { "", "Syntax error", "Symbol not bound", "Wrong number of arguments", "Wrong type", "File error", "" };
@@ -45,6 +46,7 @@ namespace arc {
 	}
 
 	bool sym_is(const atom& a, const atom& b) {
+		if (a.type != T_SYM || b.type != T_SYM) return false;
 		return std::get<sym>(a.val) == std::get<sym>(b.val);
 	}
 
@@ -551,7 +553,6 @@ namespace arc {
 			}
 			env = env->parent;
 			if (env == nullptr) {
-				/*printf("%s: ", symbol.p.symbol);*/
 				return ERROR_UNBOUND;
 			}
 		}
@@ -695,7 +696,20 @@ namespace arc {
 		if (fn.type == T_BUILTIN)
 			return std::get<builtin>(fn.val)(vargs, result);
 		else if (fn.type == T_CLOSURE) {
-			struct closure cls = *std::get<std::shared_ptr<struct closure>>(fn.val);
+			auto& cls_ptr = std::get<std::shared_ptr<struct closure>>(fn.val);
+			cls_ptr->call_count++;
+			if (vm_enabled && !cls_ptr->is_macro && cls_ptr->call_count >= 2) {
+				if (!cls_ptr->compiled && !cls_ptr->compile_attempted) {
+					compile_closure(cls_ptr.get(), cls_ptr->name);
+				}
+				if (cls_ptr->compiled) {
+					if (cls_ptr->compiled->native_entry) {
+						return cls_ptr->compiled->native_entry(vargs.data(), vargs.size(), result, cls_ptr.get());
+					}
+					return vm_execute(cls_ptr->compiled->chunk, vargs.data(), vargs.size(), result, cls_ptr.get());
+				}
+			}
+			struct closure cls = *cls_ptr;
 			std::shared_ptr<struct env> env = std::make_shared<struct env>(cls.parent_env);
 			atom arg_names = cls.args;
 			atom body = cls.body;
@@ -2020,7 +2034,13 @@ A symbol can be coerced to a string.
 
 				atom result2;
 				std::vector<atom> vargs = atom_to_vector(args);
+				bool prev_jit = jit_enabled;
+				bool prev_vm = vm_enabled;
+				jit_enabled = false;
+				vm_enabled = false;
 				err = apply(op, vargs, &result2);
+				jit_enabled = prev_jit;
+				vm_enabled = prev_vm;
 				if (err) {
 					return err;
 				}
@@ -2078,7 +2098,7 @@ A symbol can be coerced to a string.
 			atom result;
 			err = macex_eval(expr, &result);
 			if (err) {
-				err_expr = expr;
+				if (no(err_expr)) err_expr = expr;
 				break;
 			}
 			//else {
@@ -2162,6 +2182,10 @@ A symbol can be coerced to a string.
 							return err;
 						}
 						err = env_assign_eq(env, std::get<sym>(sym1.val), *result);
+						if (result->type == T_CLOSURE) {
+							auto& cls_ptr = std::get<std::shared_ptr<struct closure>>(result->val);
+							cls_ptr->name = std::get<sym>(sym1.val);
+						}
 						return err;
 					}
 					else {
@@ -2215,6 +2239,8 @@ A symbol can be coerced to a string.
 					err = make_closure(env, car(cdr(args)), cdr(cdr(args)), &macro);
 					if (!err) {
 						macro.type = T_MACRO;
+						auto& cls_ptr = std::get<std::shared_ptr<struct closure>>(macro.val);
+						cls_ptr->is_macro = true;
 						*result = name;
 						err = env_assign(env, std::get<sym>(name.val), macro);
 						return err;
@@ -2247,7 +2273,20 @@ A symbol can be coerced to a string.
 
 			/* tail call optimization of err = apply(fn, args, result); */
 			if (fn.type == T_CLOSURE) {
-				struct closure cls = fn.asp<struct closure>();
+				auto& cls_ptr = std::get<std::shared_ptr<struct closure>>(fn.val);
+				cls_ptr->call_count++;
+				if (vm_enabled && !cls_ptr->is_macro && cls_ptr->call_count >= 2) {
+					if (!cls_ptr->compiled && !cls_ptr->compile_attempted) {
+						compile_closure(cls_ptr.get(), cls_ptr->name);
+					}
+					if (cls_ptr->compiled) {
+						if (cls_ptr->compiled->native_entry) {
+							return cls_ptr->compiled->native_entry(vargs.data(), vargs.size(), result, cls_ptr.get());
+						}
+						return vm_execute(cls_ptr->compiled->chunk, vargs.data(), vargs.size(), result, cls_ptr.get());
+					}
+				}
+				struct closure cls = *cls_ptr;
 				env = std::make_shared<struct env>(cls.parent_env);
 				atom arg_names = cls.args;
 				atom body = cls.body;
@@ -2374,13 +2413,34 @@ A symbol can be coerced to a string.
 		bind_global("dir-exists", make_builtin(builtin_dir_exists));
 		bind_global("file-exists", make_builtin(builtin_file_exists));
 		bind_global("ensure-dir", make_builtin(builtin_ensure_dir));
+		bind_global("jit", make_builtin([](const std::vector<atom>& vargs, atom* result) -> error {
+			if (vargs.size() == 0) {
+				*result = jit_enabled ? sym_t : nil;
+			} else {
+				if (no(vargs[0])) {
+					jit_enabled = false;
+				} else {
+					jit_enabled = true;
+				}
+				*result = jit_enabled ? sym_t : nil;
+			}
+			return ERROR_OK;
+		}));
+		bool allow_jit = jit_enabled;
+		jit_enabled = false;
+		vm_enabled = false;
 
 #include "library.h"
 
+		err_expr = nil;
 		error err = load_string(stdlib);
 		if (err) {
 			print_error(err);
 		}
+
+		vm_enabled = true;
+		jit_enabled = allow_jit;
+		jit_init();
 	}
 
 	void print_error(error e) {

@@ -10,6 +10,7 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=gnu++17")
 
 # Source files
 set(SOURCES main.cpp arc.cpp)
+set(SOURCES main.cpp arc.cpp jit.cpp)
 
 # The target executable
 add_executable(arc++ ${SOURCES})
