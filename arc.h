@@ -22,6 +22,7 @@
 #include <iomanip>
 #include <filesystem>
 #include <variant>
+#include <chrono>
 
 #ifdef READLINE
 #include <readline/readline.h>
@@ -62,6 +63,11 @@ namespace arc {
 	typedef int sym;
 	typedef std::unordered_map<sym, atom> env_table;
 	
+	struct continuation {
+		jmp_buf* jb = nullptr;
+		bool operator==(const continuation& other) const { return jb == other.jb; }
+	};
+	
 	struct atom {
 		enum type type = T_NIL;
 		std::variant<
@@ -75,7 +81,7 @@ namespace arc {
 			FILE *,
 			std::shared_ptr<table>,
 			char,
-			jmp_buf *> val;
+			continuation> val;
 
 		template <typename T>
 		T& asp() const { return *std::get<std::shared_ptr<T>>(val); }
@@ -127,6 +133,7 @@ namespace arc {
 	error macex_eval(atom expr, atom *result);
 	error arc_load_file(const char *path);
 	error load_string(const char *text);
+	error eval_string(const char *text, atom *last_result = nullptr);
 	void arc_init();
 #ifndef READLINE
 	char *readline(const char *prompt);
@@ -155,6 +162,7 @@ namespace arc {
 	error builtin_less(const std::vector<atom>& vargs, atom* result);
 	error builtin_greater(const std::vector<atom>& vargs, atom* result);
 	error builtin_is(const std::vector<atom>& vargs, atom* result);
+	error builtin_msec(const std::vector<atom>& vargs, atom* result);
 	/* end forward */
 }
 

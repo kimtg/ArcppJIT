@@ -15,7 +15,7 @@
 namespace arc {
 
 	bool jit_enabled = true;
-	bool vm_enabled = false;
+	bool vm_enabled = true;
 
 	compiled_fn::compiled_fn() : native_code(nullptr), native_size(0), native_entry(nullptr) {}
 
@@ -90,6 +90,16 @@ namespace arc {
 			}
 			std::vector<atom> vargs = { *a, *b };
 			return builtin_divide(vargs, res);
+		}
+
+		error jit_helper_mod(atom* res, const atom* a, const atom* b) {
+			if (a->type == T_NUM && b->type == T_NUM) {
+				res->type = T_NUM;
+				res->val = fmod(std::get<double>(a->val), std::get<double>(b->val));
+				return ERROR_OK;
+			}
+			std::vector<atom> vargs = { *a, *b };
+			return builtin_mod(vargs, res);
 		}
 
 		error jit_helper_lt(atom* res, const atom* a, const atom* b) {
@@ -185,14 +195,17 @@ namespace arc {
 		error jit_helper_call(atom* res, const atom* fn, const atom* args, size_t argc) {
 			if (fn->type == T_CLOSURE) {
 				auto& callee = *std::get<std::shared_ptr<closure>>(fn->val);
-				if (vm_enabled && !callee.is_macro && !callee.compiled && !callee.compile_attempted) {
-					compile_closure(&callee);
-				}
-				if (callee.compiled && callee.compiled->native_entry) {
-					return callee.compiled->native_entry(args, argc, res, &callee);
-				}
-				if (callee.compiled) {
-					return vm_execute(callee.compiled->chunk, args, argc, res, &callee);
+				callee.call_count++;
+				if (vm_enabled && !callee.is_macro && callee.call_count >= 2) {
+					if (!callee.compiled && !callee.compile_attempted) {
+						compile_closure(&callee, callee.name);
+					}
+					if (callee.compiled && callee.compiled->native_entry) {
+						return callee.compiled->native_entry(args, argc, res, &callee);
+					}
+					if (callee.compiled) {
+						return vm_execute(callee.compiled->chunk, args, argc, res, &callee);
+					}
 				}
 			}
 			std::vector<atom> vargs(args, args + argc);
@@ -435,24 +448,45 @@ namespace arc {
 				}
 			}
 
-			// Arithmetic & Relational Builtin Inlines (binary)
+			// Arithmetic & Relational Builtin Inlines
 			if (op.type == T_SYM) {
 				sym s = std::get<sym>(op.val);
 				std::vector<atom> vargs = atom_to_vector(args);
+				std::string name = str_of_sym[s];
+
+				// Multi-argument + and * (n >= 2)
+				if (vargs.size() >= 2 && (name == "+" || name == "*")) {
+					Opcode op_code = (name == "+") ? OP_ADD : OP_MUL;
+					error err = compile_expr(vargs[0], false);
+					if (err) return err;
+					for (size_t vi = 1; vi < vargs.size(); vi++) {
+						err = compile_expr(vargs[vi], false);
+						if (err) return err;
+						emit_u8(op_code);
+					}
+					return ERROR_OK;
+				}
 
 				if (vargs.size() == 2) {
 					Opcode bin_op = (Opcode)0xFF;
-					std::string name = str_of_sym[s];
-					if (name == "+") bin_op = OP_ADD;
-					else if (name == "-") bin_op = OP_SUB;
-					else if (name == "*") bin_op = OP_MUL;
+					if (name == "-") bin_op = OP_SUB;
 					else if (name == "/") bin_op = OP_DIV;
+					else if (name == "mod") bin_op = OP_MOD;
 					else if (name == "<") bin_op = OP_LT;
 					else if (name == ">") bin_op = OP_GT;
 					else if (name == "<=") bin_op = OP_LE;
 					else if (name == ">=") bin_op = OP_GE;
 					else if (name == "is") bin_op = OP_IS;
 					else if (name == "cons") bin_op = OP_CONS;
+					else if (name == "isnt") {
+						error err1 = compile_expr(vargs[0], false);
+						if (err1) return err1;
+						error err2 = compile_expr(vargs[1], false);
+						if (err2) return err2;
+						emit_u8(OP_IS);
+						emit_u8(OP_NOT);
+						return ERROR_OK;
+					}
 
 					if (bin_op != (Opcode)0xFF) {
 						error err1 = compile_expr(vargs[0], false);
@@ -464,8 +498,10 @@ namespace arc {
 					}
 				}
 				else if (vargs.size() == 1) {
-					std::string name = str_of_sym[s];
-					if (name == "-") {
+					if (name == "+") {
+						return compile_expr(vargs[0], false);
+					}
+					else if (name == "-") {
 						atom zero; zero.type = T_NUM; zero.val = 0.0;
 						uint16_t z_idx = add_constant(zero);
 						emit_u8(OP_CONST); emit_u16(z_idx);
@@ -751,9 +787,15 @@ namespace arc {
 			thread_chunk(const_cast<BytecodeChunk&>(chunk), s_label_table);
 		}
 
-		atom locals[32];
-		size_t num_params = std::min(chunk.num_params, (size_t)32);
-		size_t num_locals = std::min(chunk.num_locals, (size_t)32);
+		atom locals_buf[32];
+		std::vector<atom> locals_dyn;
+		atom* locals = locals_buf;
+		size_t num_params = chunk.num_params;
+		size_t num_locals = chunk.num_locals;
+		if (num_locals > 32) {
+			locals_dyn.resize(num_locals);
+			locals = locals_dyn.data();
+		}
 
 		size_t fixed_params = chunk.has_rest_param ? (num_params > 0 ? num_params - 1 : 0) : num_params;
 		for (size_t i = 0; i < fixed_params; i++) {
@@ -772,7 +814,13 @@ namespace arc {
 			locals[i] = nil;
 		}
 
-		atom stack[64];
+		atom stack_buf[64];
+		std::vector<atom> stack_dyn;
+		atom* stack = stack_buf;
+		if (chunk.max_stack > 64) {
+			stack_dyn.resize(chunk.max_stack);
+			stack = stack_dyn.data();
+		}
 		atom* sp = stack;
 
 		const ThreadedInsn* pc = chunk.threaded_code.data();
@@ -960,8 +1008,7 @@ do_OP_MOD: {
 			pa->val = fmod(va, vb);
 			--sp;
 		} else {
-			std::vector<atom> vargs = { *pa, *pb };
-			error err = builtin_mod(vargs, pa);
+			error err = jit_helper_mod(pa, pa, pb);
 			if (err) return err;
 			--sp;
 		}
@@ -1331,6 +1378,11 @@ do_OP_RETURN:
 
 	static bool can_emit_native(const BytecodeChunk& chunk) {
 		if (chunk.has_rest_param) return false;
+		for (const auto& c : chunk.constants) {
+			if (c.type == T_STRING || c.type == T_CONS || c.type == T_TABLE) {
+				return false;
+			}
+		}
 		const uint8_t* ip = chunk.code.data();
 		const uint8_t* end = ip + chunk.code.size();
 		while (ip < end) {
@@ -1566,6 +1618,15 @@ do_OP_RETURN:
 					e.call_reg(0);
 					e.sub_reg_imm32(6, 32);
 					e.patch_rel32(j_done);
+					break;
+				}
+				case OP_MOD: {
+					e.lea_reg_mem(1, 6, -64);
+					e.lea_reg_mem(2, 6, -64);
+					e.lea_reg_mem(8, 6, -32);
+					e.mov_reg_imm64(0, (uint64_t)jit_helper_mod);
+					e.call_reg(0);
+					e.sub_reg_imm32(6, 32);
 					break;
 				}
 				case OP_LT: {

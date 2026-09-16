@@ -731,7 +731,7 @@ namespace arc {
 		else if (fn.type == T_CONTINUATION) {
 			if (vargs.size() != 1) return ERROR_ARGS;
 			thrown = vargs[0];
-			longjmp(*std::get<jmp_buf*>(fn.val), 1);
+			longjmp(*std::get<continuation>(fn.val).jb, 1);
 		}
 		else if (fn.type == T_STRING) { /* implicit indexing for string */
 			if (vargs.size() != 1) return ERROR_ARGS;
@@ -1030,7 +1030,7 @@ Addition. This operator also performs string and list concatenation.
 			case T_OUTPUT:
 				return std::get<FILE*>(a.val) == std::get<FILE*>(b.val);
 			case T_CONTINUATION:
-				return std::get<jmp_buf*>(a.val) == std::get<jmp_buf*>(b.val);
+				return std::get<continuation>(a.val) == std::get<continuation>(b.val);
 			}
 		}
 		return false;
@@ -1727,8 +1727,16 @@ A symbol can be coerced to a string.
 	atom make_continuation(jmp_buf* jb) {
 		atom a;
 		a.type = T_CONTINUATION;
-		a.val = jb;
+		a.val = continuation{ jb };
 		return a;
+	}
+
+	error builtin_msec(const std::vector<atom>& vargs, atom* result) {
+		if (vargs.size() != 0) return ERROR_ARGS;
+		auto now = std::chrono::steady_clock::now().time_since_epoch();
+		double ms = std::chrono::duration<double, std::milli>(now).count();
+		*result = make_number(ms);
+		return ERROR_OK;
 	}
 
 	error builtin_ccc(const std::vector<atom>& vargs, atom* result) {
@@ -2076,10 +2084,11 @@ A symbol can be coerced to a string.
 		return eval_expr(expr2, global_env, result);
 	}
 
-	error load_string(const char* text) {
+	error eval_string(const char* text, atom* last_result) {
 		error err = ERROR_OK;
 		const char* p = text;
 		atom expr;
+		if (last_result) *last_result = nil;
 		while (*p) {
 			if (isspace(*p)) {
 				p++;
@@ -2101,13 +2110,13 @@ A symbol can be coerced to a string.
 				if (no(err_expr)) err_expr = expr;
 				break;
 			}
-			//else {
-			//	print_expr(result);
-			//	putchar(' ');
-			//}			
+			if (last_result) *last_result = result;
 		}
-		//puts("");
 		return err;
+	}
+
+	error load_string(const char* text) {
+		return eval_string(text, nullptr);
 	}
 
 	error arc_load_file(const char* path)
@@ -2413,6 +2422,7 @@ A symbol can be coerced to a string.
 		bind_global("dir-exists", make_builtin(builtin_dir_exists));
 		bind_global("file-exists", make_builtin(builtin_file_exists));
 		bind_global("ensure-dir", make_builtin(builtin_ensure_dir));
+		bind_global("msec", make_builtin(builtin_msec));
 		bind_global("jit", make_builtin([](const std::vector<atom>& vargs, atom* result) -> error {
 			if (vargs.size() == 0) {
 				*result = jit_enabled ? sym_t : nil;
@@ -2427,6 +2437,7 @@ A symbol can be coerced to a string.
 			return ERROR_OK;
 		}));
 		bool allow_jit = jit_enabled;
+		bool allow_vm = vm_enabled;
 		jit_enabled = false;
 		vm_enabled = false;
 
@@ -2438,7 +2449,7 @@ A symbol can be coerced to a string.
 			print_error(err);
 		}
 
-		vm_enabled = true;
+		vm_enabled = allow_vm;
 		jit_enabled = allow_jit;
 		jit_init();
 	}

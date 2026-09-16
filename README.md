@@ -25,27 +25,44 @@ For Code::Blocks, use .cbp file.
 Usage: arc++ [OPTIONS...] [FILES...]
 
 OPTIONS:
-    -h        print this screen.
-    -v        print version.
-    -e EXPR   evaluate expression.
-    --no-jit  disable JIT compilation.
+    -h             print this screen.
+    -v             print version.
+    -e EXPR        evaluate expression.
+    -p EXPR        evaluate expression and print result.
+    -i             enter interactive REPL after executing.
+    --no-jit       disable JIT (use Direct-Threaded Bytecode VM).
+    --no-vm        disable VM and JIT (use pure AST interpreter).
+    --interp       alias for --no-vm.
+```
+
+## Testing
+Run the comprehensive test suite across all execution tiers:
+```
+make test
+```
+or directly:
+```
+arc++ tests.arc
 ```
 
 ## Special form
 `assign do fn if mac quote`
 
 ## Built-in
-`* + - / < > apply bound car ccc cdr close coerce cons cos dir dir-exists disp ensure-dir err expt eval file-exists flushout infile int is jit len log macex maptable mod mvfile newstring outfile pipe-from quit rand read readline rmfile scar scdr sin sqrt sread stderr stdin stdout string sym system t table tan trunc type write writeb`
+`* + - / < > apply bound car ccc cdr close coerce cons cos dir dir-exists disp ensure-dir err expt eval file-exists flushout infile int is jit len log macex maptable mod msec mvfile newstring outfile pipe-from quit rand read readline rmfile scar scdr sin sqrt sread stderr stdin stdout string sym system t table tan trunc type write writeb`
 
 ## Library
-`++ -- <= = >= aand abs accum acons adjoin afn aif alist all alref and andf assoc atend atom avg before best bestn caar cadr carif caris case caselet catch cddr check commonest compare complement compose consif conswhen copy copylist count counts cut dedup def defmemo do1 dotted drain each empty even fill-table find firstn flat for forlen get idfn iflet in insert-sorted insort insortnew intersperse isa isnt iso join keep keys last len< len> let list listtab loop map map1 mappend max med median mem memo memtable merge mergesort min mismatch most multiple n-of nearest no noisy-each nor nthcdr number obj odd on only ontable or orf pair point pop pos positive pr prn pull push pushnew quasiquote rand-choice rand-elt range readfile readfile1 reclist recstring reduce reinsert-sorted rem repeat retrieve rev rfn rotate round roundup rreduce set single some sort split sref sum summing swap tablist testify tuples trues union uniq unless until vals w/table w/uniq when whenlet while whiler whilet wipe with withs writefile zap`
+`++ -- <= = >= aand abs accum acons adjoin afn aif alist all alref and andf assoc atend atom avg before best bestn caar cadr carif caris case caselet catch cddr check commonest compare complement compose consif conswhen copy copylist count counts cut dedup def defmemo do1 dotted drain each empty even fill-table find firstn flat for forlen get idfn iflet in insert-sorted insort insortnew intersperse isa isnt iso join keep keys last len< len> let list listtab loop map map1 mappend max med median mem memo memtable merge mergesort min mismatch most multiple n-of nearest no noisy-each nor nthcdr number obj odd on only ontable or orf pair point pop pos positive pr prn pull push pushnew quasiquote rand-choice rand-elt range readfile readfile1 reclist recstring reduce reinsert-sorted rem repeat retrieve rev rfn rotate round roundup rreduce set single some sort split sref sum summing swap tablist testify time time10 tuples trues union uniq unless until vals w/table w/uniq when whenlet while whiler whilet wipe with withs writefile zap`
 
 ## Features
-* Multi-tier execution engine:
-  * Tier 1: Direct-threaded Bytecode Virtual Machine with pre-resolved jump targets and operands
-  * Tier 2: Native x86-64 machine code JIT compiler with direct recursive calls
+* Three-tier execution architecture:
+  * Tier 0: Pure tree-walking AST interpreter (`--no-vm` / `--interp`)
+  * Tier 1: Direct-threaded Bytecode Virtual Machine with computed gotos (`--no-jit`)
+  * Tier 2: Native x86-64 machine code JIT compiler with direct recursive calls (default)
   * Hot-spot compilation (automatic compilation after repeated invocations)
+* In-language profiling and benchmarking (`msec`, `time`, `time10`)
 * Reference counting garbage collection (shared_ptr)
+* First-class continuations (`ccc` / `call/cc`)
 * Tail call optimization
 * Implicit indexing
 * [Syntax sugar](http://arclanguage.github.io/ref/evaluation.html) (`[]`, `~`, `.`, `!`, `:`)

@@ -1,5 +1,5 @@
 BIN=arc++
-CXXFLAGS=-Wall -g -O2 -c -std=gnu++17
+CXXFLAGS=-Wall -O3 -c -std=gnu++17
 LDFLAGS=-lm -lstdc++fs
 
 $(BIN): main.o arc.o jit.o
@@ -24,7 +24,11 @@ arc.o: arc.cpp arc.h library.h jit.h
 jit.o: jit.cpp jit.h arc.h
 	$(CXX) $(CXXFLAGS) jit.cpp
 run: $(BIN)
-	./$(BIN)
+	$(BIN)
+test: $(BIN)
+	$(BIN) tests.arc
+	$(BIN) --no-jit tests.arc
+	$(BIN) --no-vm tests.arc
 clean:
 	rm -f $(BIN) *.o
 tag:

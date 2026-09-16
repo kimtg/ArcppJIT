@@ -724,6 +724,16 @@ a list of the results."
        (prn)
        (flushout))))
 
+(mac time (expr)
+  (w/uniq (t1 val)
+    `(let ,t1 (msec)
+       (let ,val ,expr
+         (prn "time: " (- (msec) ,t1) " msec.")
+         ,val))))
+
+(mac time10 (expr)
+  `(time (repeat 10 ,expr)))
+
 (mac on (var s . body)
 "Like [[each]], but also maintains a variable calles 'index' counting the iterations."
   (if (is var 'index)
