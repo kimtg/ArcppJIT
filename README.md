@@ -1,4 +1,4 @@
-# Arc++: An implementation of the Arc programming language #
+# Arc++ JIT: An implementation of the Arc programming language #
 
 Arc is a dialect of Lisp.
 

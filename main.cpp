@@ -4,7 +4,7 @@
 constexpr auto VERSION = "0.36.3";
 
 void print_logo() {
-	printf("Arc++ %s\n", VERSION);
+	printf("Arc++ JIT %s\n", VERSION);
 }
 
 int main(int argc, char **argv)
